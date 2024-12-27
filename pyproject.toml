@@ -1,0 +1,19 @@
+[tool.poetry]
+name = "gcloud-yolo"
+version = "0.1.0"
+description = "Let AI yolo Google Cloud. Experimental Only."
+authors = ["Chen Shou <cshou@google.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.13"
+google-cloud-aiplatform = "^1.75.0"
+langchain = "^0.3.13"
+langchain-community = "^0.3.13"
+langgraph = "^0.2.60"
+langchain-google-vertexai = "^2.0.9"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
