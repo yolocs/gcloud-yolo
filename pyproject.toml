@@ -12,6 +12,9 @@ langchain = "^0.3.13"
 langchain-community = "^0.3.13"
 langgraph = "^0.2.60"
 langchain-google-vertexai = "^2.0.9"
+google-crc32c = "^1.6.0"
+rich = "^13.9.4"
+langchain-google-community = "^2.0.3"
 
 
 [build-system]

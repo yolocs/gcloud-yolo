@@ -1,14 +1,72 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from pydantic.v1 import BaseModel, Field
-from langchain.agents.format_scratchpad import format_log_to_str
+from langchain_core.agents import AgentFinish
+from langchain_core.tools import Tool, BaseTool
 from langchain.agents.output_parsers import JSONAgentOutputParser
-from langchain.tools import BaseTool, StructuredTool, Tool
-from langchain_google_vertexai import VertexAI
+from langchain_google_community import GoogleSearchAPIWrapper
+from langchain_google_vertexai import ChatVertexAI
 from langgraph.graph import StateGraph, END
+from rich.console import Console
+from rich.markdown import Markdown
 from typing import List, Tuple, Dict, Any
 import subprocess
-import json
 import re
+import logging
+import argparse
+
+parser = argparse.ArgumentParser(description="Google Cloud Debugging Agent")
+parser.add_argument(
+    "-l",
+    "--loglevel",
+    default="INFO",
+    help="Set the logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)",
+)
+parser.add_argument(
+    "--model",
+    default="gemini-1.5-pro-002",
+    help="All Gemini models: gemini-1.5-pro-002, gemini-2.0-flash-exp, gemini-2.0-flash-thinking-exp-1219",
+)
+parser.add_argument(
+    "--project",
+    default="gochen",
+    help="The project where the Gemini is hosted",
+)
+parser.add_argument(
+    "--location",
+    default="us-central1",
+    help="The location where the Gemini is hosted",
+)
+args = parser.parse_args()
+
+logging.basicConfig(level=logging.getLevelNamesMapping()[args.loglevel.upper()])
+
+# Not that useful.
+# search = GoogleSearchAPIWrapper()
+# search_tool = Tool(
+#     name="search-gcp-documentation",
+#     func=search.run,
+#     description="Use this tool to search GCP documentation and ground the reasoning logic",
+# )
+
+
+# Thoughts: The models are absolutely NOT intelligent enough to reason even slightly twisted interaction.
+# We probably need a series of small tools to provide "tips" of common debugging approaches.
+def sbom_instruction(q: str):
+    return f"First, use `gcloud artifacts sbom list --resource={q}` to find the SBOM location is Google Storage bucket. If no result exists, then it means there is no SBOM for the given artifact. If there is a Google Storage location (indicated by `gs://` URL in the output), then use command `gcloud storage cat gs://` to output the SBOM content."
+
+
+sbom_tool = Tool(
+    name="how-to-retrieve-sbom",
+    description="Use this tool to find the right gcloud command to retrieve artifact SBOM",
+    func=sbom_instruction,
+)
+
+llm = ChatVertexAI(
+    model=args.model,
+    # model="gemini-2.0-flash-thinking-exp-1219",
+    project=args.project,
+    location=args.location,
+)
 
 
 # Define the state of the agent
@@ -27,15 +85,21 @@ class GCloudTool(BaseTool):
     )
 
     def _run(self, command: str) -> str:
+        logging.debug(f"Received command: {command}")
+
         unsafe_commands = ["delete", "create", "update", "patch", "set"]
         if any(cmd in command for cmd in unsafe_commands):
             return "gcloud command failed: cannot execute gcloud command; only read-only command is supported"
 
+        if not command.startswith("gcloud "):
+            command = "gcloud " + command
+
         try:
-            full_command = f"gcloud {' '.join(command.split())} --format=json"
             process = subprocess.run(
-                full_command, shell=True, capture_output=True, text=True, check=False
+                command, shell=True, capture_output=True, text=True, check=False
             )
+
+            logging.debug(f"gcloud command output: {process.stdout}")
 
             if process.returncode != 0:
                 error_message = process.stderr.strip()
@@ -53,11 +117,7 @@ class GCloudTool(BaseTool):
             if process.stdout.strip() == "":
                 return "gcloud command executed successfully but returned empty output."
 
-            try:
-                json.loads(process.stdout)
-                return process.stdout
-            except json.JSONDecodeError:
-                return f"gcloud command output is not valid JSON:\n{process.stdout}"
+            return process.stdout
 
         except Exception as e:
             return f"gcloud command failed: {e}"
@@ -82,11 +142,17 @@ class AskForClarification(BaseTool):
 
 
 # Initialize LLM and tools
-llm = VertexAI(model="gemini-2.0-flash-exp", project="gochen", location="us-central1")
-tools = [GCloudTool(), AskForClarification()]
+tools = [GCloudTool(), AskForClarification(), sbom_tool]
+
+
+def tool_desc():
+    return "\n".join([f"Name: {t.name}, Description: {t.description}" for t in tools])
+
 
 # Define the prompt template (improved to handle errors)
-template = """You are a helpful AI assistant that helps debug Google Cloud workloads. You can use the `gcloud` tool to interact with Google Cloud and the `ask_for_clarification` tool to ask clarifying questions.
+template = """You are a helpful AI assistant that helps debug Google Cloud workloads. You have access to the following tools:
+
+{tools}
 
 If a gcloud command returns an error, carefully analyze the error message. If the error is due to a missing resource (NOT_FOUND), try to infer the correct resource name or ask for clarification. If the error is due to an invalid argument (INVALID_ARGUMENT), double-check the command syntax and arguments. If the error is due to permission denied, inform the user that they might not have the necessary permissions.
 
@@ -109,15 +175,6 @@ Here is the user query:
 prompt = ChatPromptTemplate.from_template(template)
 
 
-# # Create the LangGraph
-# def should_continue(state):
-#     messages = state["messages"]
-#     last_message = messages[-1]
-#     if "Final Answer" in last_message["content"]:
-#         return "end"
-#     return "continue"
-
-
 def continue_next(state: AgentState):
     return state.next
 
@@ -127,13 +184,13 @@ def call_tool(state: AgentState):
     intermediate_steps = state.intermediate_steps
     user_query = state.user_query
 
-    parsed = JSONAgentOutputParser().parse(messages[-1]["content"])
-    # tool_name = parsed["action"]
-    # tool_input = parsed["action_input"]
-    tool_name = parsed.tool
-    tool_input = parsed.tool_input
+    logging.debug("Entered tool calling...")
 
-    if tool_name == "Final Answer":
+    # This function already handles json in markdown format.
+    parsed = JSONAgentOutputParser().parse(messages[-1]["content"])
+
+    if isinstance(parsed, AgentFinish):
+        logging.debug("Agent finished")
         return {
             "messages": messages,
             "intermediate_steps": intermediate_steps,
@@ -141,11 +198,19 @@ def call_tool(state: AgentState):
             "next": "end",
         }
 
+    tool_name = parsed.tool
+    tool_input = parsed.tool_input
+
     tool = next((t for t in tools if t.name == tool_name), None)
     if not tool:
         raise ValueError(f"Tool {tool_name} not found.")
 
+    logging.debug(f"Calling tool: {tool_name} with input: {tool_input}")
+
     tool_output = tool.run(tool_input)
+
+    logging.debug(f"Called tool: {tool_name} and got output {tool_output}")
+
     messages.append(
         {"role": "assistant", "content": f"Tool {tool_name} returned: {tool_output}"}
     )
@@ -190,13 +255,25 @@ def generate_response(state: AgentState):
     user_query = state.user_query
 
     prompt_value = prompt.format(
-        # chat_history=format_log_to_str(messages[:-1]),
-        chat_history=messages[:-1],
+        tools=tool_desc(),
+        chat_history=messages,
         intermediate_steps=intermediate_steps,
         user_query=user_query,
     )
+
+    logging.debug(f"Generated prompt: {prompt_value}")
+
     response = llm.invoke(prompt_value)
-    messages.append({"role": "assistant", "content": response})
+
+    if isinstance(response.content, str):
+        content = [response.content]
+    else:
+        content = response.content
+
+    logging.info(f"Thinking: {content[0]}")
+    logging.debug(f"Markdown JSON from LLM response: {content[-1]}")
+
+    messages.append({"role": "assistant", "content": content[-1]})
     return {
         "messages": messages,
         "intermediate_steps": intermediate_steps,
@@ -268,6 +345,7 @@ app = workflow.compile()
 
 def run_interactive_agent():
     print("Welcome to the Google Cloud Debugging Agent!")
+    console = Console()
     while True:
         user_query = input("\nEnter your query (or type 'exit' to quit): ")
         if user_query.lower() == "exit":
@@ -279,7 +357,11 @@ def run_interactive_agent():
         final_state = app.invoke(state)
 
         print("\nFinal Answer:")
-        print(final_state.messages[-1]["content"])
+        # print(final_state.get("messages")[-1]["content"])
+        parsed = JSONAgentOutputParser().parse(
+            final_state.get("messages")[-1]["content"]
+        )
+        console.print(Markdown(parsed.return_values["output"]))
         print("-" * 40)  # Separator for better readability
 
 
