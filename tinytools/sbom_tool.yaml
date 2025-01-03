@@ -1,0 +1,4 @@
+name: 'how-to-retrieve-sbom'
+description: 'Use this tool to find the right gcloud command to retrieve artifact SBOM'
+instruction: |-
+  First, use `gcloud artifacts sbom list --resource={input}` to find the SBOM location is Google Storage bucket. If no result exists, then it means there is no SBOM for the given artifact. If there is a Google Storage location (indicated by `gs://` URL in the output), then use command `gcloud storage cat gs://` to output the SBOM content.

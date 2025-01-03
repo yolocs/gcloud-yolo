@@ -13,6 +13,8 @@ import subprocess
 import re
 import logging
 import argparse
+import os
+import yaml
 
 parser = argparse.ArgumentParser(description="Google Cloud Debugging Agent")
 parser.add_argument(
@@ -23,7 +25,7 @@ parser.add_argument(
 )
 parser.add_argument(
     "--model",
-    default="gemini-1.5-pro-002",
+    default="gemini-2.0-flash-exp",
     help="All Gemini models: gemini-1.5-pro-002, gemini-2.0-flash-exp, gemini-2.0-flash-thinking-exp-1219",
 )
 parser.add_argument(
@@ -36,34 +38,59 @@ parser.add_argument(
     default="us-central1",
     help="The location where the Gemini is hosted",
 )
+parser.add_argument(
+    "--tinytools",
+    default="./tinytools",
+    help="The directory contains all the 'tiny tools'",
+)
 args = parser.parse_args()
 
+console = Console()
 logging.basicConfig(level=logging.getLevelNamesMapping()[args.loglevel.upper()])
 
-# Not that useful.
-# search = GoogleSearchAPIWrapper()
-# search_tool = Tool(
-#     name="search-gcp-documentation",
-#     func=search.run,
-#     description="Use this tool to search GCP documentation and ground the reasoning logic",
-# )
-
-
-# Thoughts: The models are absolutely NOT intelligent enough to reason even slightly twisted interaction.
-# We probably need a series of small tools to provide "tips" of common debugging approaches.
-def sbom_instruction(q: str):
-    return f"First, use `gcloud artifacts sbom list --resource={q}` to find the SBOM location is Google Storage bucket. If no result exists, then it means there is no SBOM for the given artifact. If there is a Google Storage location (indicated by `gs://` URL in the output), then use command `gcloud storage cat gs://` to output the SBOM content."
-
-
-sbom_tool = Tool(
-    name="how-to-retrieve-sbom",
-    description="Use this tool to find the right gcloud command to retrieve artifact SBOM",
-    func=sbom_instruction,
+# Not that useful. Limit the results.
+search = GoogleSearchAPIWrapper(k=2)
+search_tool = Tool(
+    name="search-gcp-documentation",
+    func=lambda q: search.run(q + " site:cloud.google.com"),
+    description="Use this tool to search GCP documentation",
 )
+
+
+def load_tinytools() -> List[Tool]:
+    tinytools_dir = args.tinytools
+    if not os.path.exists(tinytools_dir):
+        raise ValueError(f"Tinytools directory '{tinytools_dir}' does not exist.")
+
+    tools = []
+    for filename in os.listdir(tinytools_dir):
+        if filename.endswith(".yaml"):
+            filepath = os.path.join(tinytools_dir, filename)
+            with open(filepath, "r") as f:
+                try:
+                    tool_config = yaml.safe_load(f)
+                    tool_name = tool_config.get("name")
+                    tool_description = tool_config.get("description")
+                    tool_instruction = tool_config.get("instruction")
+                    if not tool_name or not tool_description or not tool_instruction:
+                        logging.warning(
+                            f"Skipping incomplete tool definition in {filepath}"
+                        )
+                        continue
+                    tool_func = lambda q: tool_instruction.format(input=q)
+                    tools.append(
+                        Tool(
+                            name=tool_name, description=tool_description, func=tool_func
+                        )
+                    )
+                except yaml.YAMLError as e:
+                    logging.error(f"Error parsing YAML file {filepath}: {e}")
+
+    return tools
+
 
 llm = ChatVertexAI(
     model=args.model,
-    # model="gemini-2.0-flash-thinking-exp-1219",
     project=args.project,
     location=args.location,
 )
@@ -99,7 +126,7 @@ class GCloudTool(BaseTool):
                 command, shell=True, capture_output=True, text=True, check=False
             )
 
-            logging.debug(f"gcloud command output: {process.stdout}")
+            logging.debug(f"Raw gcloud command output: {process.stdout}")
 
             if process.returncode != 0:
                 error_message = process.stderr.strip()
@@ -142,7 +169,7 @@ class AskForClarification(BaseTool):
 
 
 # Initialize LLM and tools
-tools = [GCloudTool(), AskForClarification(), sbom_tool]
+tools = [GCloudTool(), AskForClarification(), search_tool] + load_tinytools()
 
 
 def tool_desc():
@@ -153,6 +180,8 @@ def tool_desc():
 template = """You are a helpful AI assistant that helps debug Google Cloud workloads. You have access to the following tools:
 
 {tools}
+
+Always try to search the GCP documentation first to know the right tasks to do.
 
 If a gcloud command returns an error, carefully analyze the error message. If the error is due to a missing resource (NOT_FOUND), try to infer the correct resource name or ask for clarification. If the error is due to an invalid argument (INVALID_ARGUMENT), double-check the command syntax and arguments. If the error is due to permission denied, inform the user that they might not have the necessary permissions.
 
@@ -183,8 +212,6 @@ def call_tool(state: AgentState):
     messages = state.messages
     intermediate_steps = state.intermediate_steps
     user_query = state.user_query
-
-    logging.debug("Entered tool calling...")
 
     # This function already handles json in markdown format.
     parsed = JSONAgentOutputParser().parse(messages[-1]["content"])
@@ -270,7 +297,8 @@ def generate_response(state: AgentState):
     else:
         content = response.content
 
-    logging.info(f"Thinking: {content[0]}")
+    console.print(f"\n== Step ==\n{content[0]}")
+    console.print("-" * 40)
     logging.debug(f"Markdown JSON from LLM response: {content[-1]}")
 
     messages.append({"role": "assistant", "content": content[-1]})
@@ -344,8 +372,8 @@ app = workflow.compile()
 
 
 def run_interactive_agent():
-    print("Welcome to the Google Cloud Debugging Agent!")
-    console = Console()
+    console.print("== Welcome to the Google Cloud Debugging Agent! ==")
+
     while True:
         user_query = input("\nEnter your query (or type 'exit' to quit): ")
         if user_query.lower() == "exit":
@@ -356,13 +384,13 @@ def run_interactive_agent():
         )
         final_state = app.invoke(state)
 
-        print("\nFinal Answer:")
-        # print(final_state.get("messages")[-1]["content"])
         parsed = JSONAgentOutputParser().parse(
             final_state.get("messages")[-1]["content"]
         )
+
+        console.print("\n== Final Answer ==")
         console.print(Markdown(parsed.return_values["output"]))
-        print("-" * 40)  # Separator for better readability
+        console.print("=" * 40)  # Separator for better readability
 
 
 if __name__ == "__main__":
