@@ -1,0 +1,4 @@
+name: 'container-image-provenance'
+description: 'Use this tool to find the right gcloud command to retrieve provenance for container images'
+instruction: |-
+  Use `gcloud artifacts docker images describe {input} --show-provenance` to show the image provenance. If available, the attribute `provenance_summary` will include the image provenance. Specifically, the nested attribute `sourceProvenance` tells the source code location of the image.

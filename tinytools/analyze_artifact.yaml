@@ -1,0 +1,5 @@
+name: 'analyze-artifact'
+description: 'Use this tool to understand how to analyze and retrieve all relevant information about the artifact'
+instruction: |-
+  Try find the artifact SBOM of the artifact to detect its dependencies.
+  Try find the artifact provenance to know where it comes from, e.g. the source code location, from which commit.

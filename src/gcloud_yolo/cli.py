@@ -77,14 +77,25 @@ def load_tinytools() -> List[Tool]:
                             f"Skipping incomplete tool definition in {filepath}"
                         )
                         continue
-                    tool_func = lambda q: tool_instruction.format(input=q)
+                    tool_func = (
+                        lambda q, instruction=tool_instruction: instruction.format(
+                            input=q
+                        )
+                    )
                     tools.append(
                         Tool(
-                            name=tool_name, description=tool_description, func=tool_func
+                            name=tool_name,
+                            description=tool_description,
+                            func=tool_func,
                         )
                     )
                 except yaml.YAMLError as e:
                     logging.error(f"Error parsing YAML file {filepath}: {e}")
+
+    for t in tools:
+        logging.debug(
+            f"Loaded tool: {t.name}, {t.description} - sanity check instruction: {t.func('test')}"
+        )
 
     return tools
 
