@@ -387,6 +387,7 @@ app = workflow.compile()
 
 def run_interactive_agent():
     console.print("== Welcome to the Google Cloud Debugging Agent! ==")
+    past_answers = []
 
     while True:
         user_query = input("\nEnter your query (or type 'exit' to quit): ")
@@ -394,16 +395,25 @@ def run_interactive_agent():
             break
 
         state = AgentState(
-            messages=[{"role": "user", "content": user_query}], user_query=user_query
+            messages=[
+                {"role": "user", "content": user_query},
+                {
+                    "role": "assistant",
+                    "content": f"Knowledge I have learned from the past: {'\n'.join(past_answers)}",
+                },
+            ],
+            user_query=user_query,
         )
         final_state = app.invoke(state)
 
         parsed = JSONAgentOutputParser().parse(
             final_state.get("messages")[-1]["content"]
         )
+        last_answer = parsed.return_values["output"]
+        past_answers.append(last_answer)
 
         console.print("\n== Final Answer ==")
-        console.print(Markdown(parsed.return_values["output"]))
+        console.print(Markdown(last_answer))
         console.print("=" * 40)  # Separator for better readability
 
 
