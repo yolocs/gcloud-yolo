@@ -1,0 +1,8 @@
+name: 'cloud-asset-inventory'
+description: 'Use this tool to find gcloud commands to call Cloud Asset Inventory.'
+instruction: |-
+  To find out which resources a user can access, run: `gcloud asset analyze-iam-policy --organization=YOUR_ORG_ID --identity='user:u1@foo.com'``
+  To find out which resources a service account can access, run: `gcloud asset analyze-iam-policy --project=YOUR_PROJECT_ID --identity='serviceAccount:u1@foo.com'``
+  To list effective IAM policies of 3 resources in a project using project ID, run: `gcloud asset get-effective-iam-policy --scope=projects/YOUR_PROJECT_ID --names=RESOURCE_NAME1,RESOURCE_NAME2,RESOURCE_NAME3`
+  To count the number of compute instances, run: `gcloud asset query --project='test-project' --statement='SELECT * FROM compute_googleapis_com_Instance'`
+  To search all the IAM policies that specify amy@mycompany.com within organizations/123456, ensure the caller has been granted the cloudasset.assets.searchAllIamPolicies permission on the organization and run: `gcloud asset search-all-iam-policies --scope='organizations/123456' --query='policy:amy@mycompany.com'`. The other useful query is like `resource=//cloudresourcemanager.googleapis.com/projects/myproject` to find IAM policy bindings that are set on the project named myproject.
