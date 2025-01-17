@@ -125,7 +125,7 @@ class GCloudTool(BaseTool):
     def _run(self, command: str) -> str:
         logging.debug(f"Received command: {command}")
 
-        unsafe_commands = ["delete", "create", "update", "patch", "set"]
+        unsafe_commands = ["delete", "create", "update", "patch"]
         if any(cmd in command for cmd in unsafe_commands):
             return "gcloud command failed: cannot execute gcloud command; only read-only command is supported"
 
@@ -193,6 +193,8 @@ template = """You are a helpful AI assistant that helps debug Google Cloud workl
 {tools}
 
 Always try to search the GCP documentation first to know the right tasks to do.
+
+Cloud Asset Inventory is a powerful tool to find thorough information about any cloud resources, especially to analyze IAM and org policies.
 
 If a gcloud command returns an error, carefully analyze the error message. If the error is due to a missing resource (NOT_FOUND), try to infer the correct resource name or ask for clarification. If the error is due to an invalid argument (INVALID_ARGUMENT), double-check the command syntax and arguments. If the error is due to permission denied, inform the user that they might not have the necessary permissions.
 
@@ -312,7 +314,8 @@ def generate_response(state: AgentState):
     console.print("-" * 40)
     logging.debug(f"Markdown JSON from LLM response: {content[-1]}")
 
-    messages.append({"role": "assistant", "content": content[-1]})
+    messages.append({"role": "assistant", "content": "\n".join(content)})
+
     return {
         "messages": messages,
         "intermediate_steps": intermediate_steps,

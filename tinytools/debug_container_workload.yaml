@@ -1,0 +1,7 @@
+name: 'debug-container-workload'
+description: 'Use this tool to find additional steps to debug container workloads such as GKE and Cloud Run'
+instruction: |-
+  First, try to inspect the workload spec and find any suspicious configuration error.
+  Second, try to directly query the recent logs for the workload, use command `gcloud logging read`, and check recent errors.
+  In addition to inspect the workload spec, try to find the container image being used by the workload. Then try to analyze the container image to find additional information like provenance and use the information to trace back to the original build and source code. These insights could help the debugging.
+  Summarize all these findings and suggest further debugging steps.
