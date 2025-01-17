@@ -1,3 +1,0 @@
-What do you know about us-docker.pkg.dev/gochen/whoamikidding-dev/gob-mossy@sha256:0009ad676104b9fd3016d4c5de5c6d92988e7153d01f68680c0a4c7e2dcf74c3?
-
-What do you know about us-docker.pkg.dev/gochen/images/gcb-say@sha256:29a8b91356267341c1c0275947135c57fa4aeca78a2eab64a1f3b2bfa36f2016?
