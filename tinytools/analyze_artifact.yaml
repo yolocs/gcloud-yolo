@@ -4,4 +4,3 @@ instruction: |-
   An artifact URL could look like `[LOCATION]-[REPO_TYPE].pkg.dev/[PROJECT_ID]/[REPO_ID]`. E.g. `us-docker.pkg.dev/my-project/my-repo`. You can then retrieve the location, repo type and id from the URL.
   Try find the artifact SBOM of the artifact to detect its dependencies.
   Try find the artifact provenance to know where it comes from, e.g. the source code location, from which commit.
-  Try find the direct IAM policy on the artifact.
